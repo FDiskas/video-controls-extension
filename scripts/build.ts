@@ -32,6 +32,11 @@ async function copyStaticAssets(): Promise<void> {
 		recursive: true,
 		force: true,
 	});
+	await cp(join(ROOT, 'icons'), join(DIST, 'icons'), {
+		recursive: true,
+		force: true,
+		filter: (source) => !source.endsWith('.svg'),
+	});
 }
 
 async function writeManifest(): Promise<void> {

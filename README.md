@@ -45,7 +45,6 @@ The defaults are the same keys YouTube uses for the same actions.
 
 - A video element that is itself fullscreen cannot show the bar. Player containers that go fullscreen (YouTube, most sites) work.
 - Videos inside closed shadow roots are not found.
-- The extension has no icon yet. Chrome shows a default letter icon.
 
 ## Development
 
