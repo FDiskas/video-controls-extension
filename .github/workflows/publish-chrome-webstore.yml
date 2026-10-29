@@ -1,0 +1,104 @@
+name: Publish Chrome Extension
+
+on:
+  push:
+    tags:
+      - "v[0-9]*"
+      - "[0-9]*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Extension version, higher than the published one (e.g. 1.3)"
+        required: true
+        type: string
+
+jobs:
+  publish:
+    name: Publish to Chrome Web Store
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Resolve version
+        id: version
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          VERSION="${INPUT_VERSION:-${GITHUB_REF_NAME#v}}"
+          if ! [[ "$VERSION" =~ ^(0|[1-9][0-9]*)(\.(0|[1-9][0-9]*)){0,3}$ ]]; then
+            echo "::error::Invalid version '$VERSION'. Use 1 to 4 dot-separated numbers, e.g. 1.3"
+            exit 1
+          fi
+          PACKAGE="video-frame-controls-$VERSION.zip"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "PACKAGE=$PACKAGE" >> "$GITHUB_ENV"
+          echo "CRX_PACKAGE=${PACKAGE%.zip}.crx" >> "$GITHUB_ENV"
+          echo "package=$PACKAGE" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Typecheck
+        run: bun run typecheck
+
+      - name: Lint
+        run: bun run lint
+
+      - name: Test
+        run: bun test
+
+      - name: Build
+        run: bun run build
+
+      - name: Set manifest version
+        run: |
+          jq --arg version "$VERSION" '.version = $version' dist/manifest.json > dist/manifest.tmp
+          mv dist/manifest.tmp dist/manifest.json
+
+      - name: Create extension package
+        run: |
+          cd dist
+          zip -r "../$PACKAGE" .
+
+      - name: Create signed CRX package
+        env:
+          CRX_PRIVATE_KEY: ${{ secrets.CRX_PRIVATE_KEY }}
+        run: |
+          if [ -z "$CRX_PRIVATE_KEY" ]; then
+            echo "::warning::Secret CRX_PRIVATE_KEY is not set. Skipping the .crx package."
+            exit 0
+          fi
+          KEY_FILE="$RUNNER_TEMP/crx-key.pem"
+          printf '%s\n' "$CRX_PRIVATE_KEY" > "$KEY_FILE"
+          bunx crx3@2.0.0 --keyPath "$KEY_FILE" --crxPath "$CRX_PACKAGE" dist < /dev/null
+          rm "$KEY_FILE"
+
+      - name: Attach packages to GitHub release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1 \
+            || gh release create "$GITHUB_REF_NAME" --generate-notes --verify-tag
+          ASSETS=("$PACKAGE")
+          [ -f "$CRX_PACKAGE" ] && ASSETS+=("$CRX_PACKAGE")
+          gh release upload "$GITHUB_REF_NAME" "${ASSETS[@]}" --clobber
+
+      - name: Upload and publish
+        uses: mobilefirstllc/cws-publish@569e87bc9a54ad7712ba6dc154a110d88af63b85 # 2.1.1
+        with:
+          action: publish
+          client_id: ${{ vars.CWS_CLIENT_ID }}
+          client_secret: ${{ secrets.CWS_CLIENT_SECRET }}
+          refresh_token: ${{ secrets.CWS_REFRESH_TOKEN }}
+          extension_id: ${{ vars.CWS_EXTENSION_ID }}
+          zip_file: ${{ steps.version.outputs.package }}
