@@ -18,8 +18,13 @@ function areaInViewport(rect: DOMRect): number {
 	return Math.max(width, 0) * Math.max(height, 0);
 }
 
+/**
+ * Decorative background players are sometimes left without any source and only
+ * show their poster, so there is nothing to control.
+ */
 function needsControls(video: HTMLVideoElement, rect: DOMRect): boolean {
 	return (
+		video.currentSrc !== '' &&
 		rect.width >= MIN_WIDTH &&
 		rect.height >= MIN_HEIGHT &&
 		!video.controls &&
